@@ -27,25 +27,30 @@ DEFAULT_API_URL = "https://pinframes.onrender.com"
 
 def configure_cloud():
     load_dotenv(ENV_FILE, override=True)
-    token = os.getenv("PINFRAMES_FEED_TOKEN", "").strip()
-    changed = False
+    saved_token = os.getenv("PINFRAMES_FEED_TOKEN", "").strip()
 
-    if not token:
-        token = getpass.getpass("PinFrames private feed token: ").strip()
+    for attempt in range(3):
+        prompt = "PinFrames private feed token"
+        if saved_token:
+            prompt += " (press Enter to reuse the saved token)"
+        token = getpass.getpass(prompt + ": ").strip() or saved_token
         if not token:
             raise ValueError("A private feed token is required to sync this collector.")
-        set_key(str(ENV_FILE), "PINFRAMES_FEED_TOKEN", token, quote_mode="always")
-        changed = True
 
-    if changed:
         try:
-            ENV_FILE.chmod(0o600)
-        except OSError:
-            pass
-        print("Saved collector settings in this folder's private .env file.")
+            cloud_api_request("/api/auth", token, DEFAULT_API_URL)
+        except RuntimeError as error:
+            if attempt < 2 and ("HTTP 401" in str(error) or "HTTP 400" in str(error)):
+                print("That feed token was rejected. Enter the current Render FEED_TOKEN.", file=sys.stderr)
+                saved_token = ""
+                continue
+            raise
 
-    os.environ["PINFRAMES_FEED_TOKEN"] = token
-    return DEFAULT_API_URL, token
+        save_feed_token(token)
+        print("Verified and saved the private feed token in this folder's .env.")
+        return DEFAULT_API_URL, token
+
+    raise ValueError("Could not verify the feed token after three attempts.")
 
 
 def save_feed_token(token):
@@ -215,20 +220,8 @@ def main():
     try:
         settings = cloud_api_request("/api/settings", api_token, api_url)
     except RuntimeError as error:
-        if "HTTP 401" not in str(error):
-            print(error, file=sys.stderr)
-            return 1
-        print("The saved feed token was rejected.")
-        api_token = getpass.getpass("Enter the current PinFrames private feed token: ").strip()
-        if not api_token:
-            print("A private feed token is required to sync this collector.", file=sys.stderr)
-            return 1
-        save_feed_token(api_token)
-        try:
-            settings = cloud_api_request("/api/settings", api_token, api_url)
-        except RuntimeError as retry_error:
-            print(retry_error, file=sys.stderr)
-            return 1
+        print(error, file=sys.stderr)
+        return 1
 
     if not args.headed and not cloud_scrape_is_due(settings, args.force):
         print("The saved PinFrames feed is still fresh; no scrape was started.")

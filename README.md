@@ -13,7 +13,7 @@ python -m pip install -r requirements.txt
 python -m playwright install chromium
 ```
 
-No manual `.env` setup is needed. On first run, the CLI privately prompts for the Render feed token and creates a permission-restricted `.env` automatically; the file is git-ignored. The Render service URL is built in, so it does not prompt for it. If the saved token is rejected with HTTP 401, the CLI asks for the current token again and updates `.env`.
+No manual `.env` setup is needed. Each run privately asks for the Render feed token; press Enter to reuse the saved token. If a token is rejected, the CLI asks again and retries. A verified token is saved in a permission-restricted, git-ignored `.env`. The Render service URL is built in, so it never prompts for it.
 
 ## First run on each computer
 
