@@ -23,34 +23,46 @@ STATE_FILE = ROOT / ".frame-state.json"
 PROFILE_DIR = ROOT / ".pinterest-browser-profile"
 ENV_FILE = ROOT / ".env"
 DEFAULT_API_URL = "https://pinframes.onrender.com"
+FEED_READY_SCRIPT = """() => {
+    const path = location.pathname.toLowerCase();
+    const isPinterestHomeFeed = location.hostname.endsWith('pinterest.com') && path.includes('homefeed');
+    const isAuthRoute = /\/(login|signup|register)(\/|$)/i.test(path);
+    const isPasswordForm = Array.from(document.querySelectorAll('input[type="password"]')).some(input => input.getClientRects().length);
+    const pinImages = Array.from(document.querySelectorAll("a[href*='/pin/'] img"));
+    const hasPinImage = pinImages.some(image => (image.currentSrc || image.src || '').includes('i.pinimg.com/'));
+    return isPinterestHomeFeed && !isAuthRoute && !isPasswordForm && hasPinImage;
+}"""
 
 
-def configure_cloud():
-    load_dotenv(ENV_FILE, override=True)
-    saved_token = os.getenv("PINFRAMES_FEED_TOKEN", "").strip()
-
+def prompt_for_feed_token():
     for attempt in range(3):
-        prompt = "PinFrames private feed token"
-        if saved_token:
-            prompt += " (press Enter to reuse the saved token)"
-        token = getpass.getpass(prompt + ": ").strip() or saved_token
+        token = getpass.getpass("PinFrames private feed token: ").strip()
         if not token:
-            raise ValueError("A private feed token is required to sync this collector.")
-
+            print("A private feed token is required.", file=sys.stderr)
+            continue
         try:
             cloud_api_request("/api/auth", token, DEFAULT_API_URL)
         except RuntimeError as error:
-            if attempt < 2 and ("HTTP 401" in str(error) or "HTTP 400" in str(error)):
-                print("That feed token was rejected. Enter the current Render FEED_TOKEN.", file=sys.stderr)
-                saved_token = ""
-                continue
-            raise
-
+            print(f"Feed token rejected: {error}", file=sys.stderr)
+            continue
         save_feed_token(token)
         print("Verified and saved the private feed token in this folder's .env.")
-        return DEFAULT_API_URL, token
-
+        return token
     raise ValueError("Could not verify the feed token after three attempts.")
+
+
+def configure_cloud(force_prompt=False):
+    load_dotenv(ENV_FILE, override=True)
+    saved_token = os.getenv("PINFRAMES_FEED_TOKEN", "").strip()
+    if force_prompt or not saved_token:
+        return DEFAULT_API_URL, prompt_for_feed_token()
+    try:
+        cloud_api_request("/api/auth", saved_token, DEFAULT_API_URL)
+    except RuntimeError as error:
+        print(f"Saved feed token rejected: {error}", file=sys.stderr)
+        return DEFAULT_API_URL, prompt_for_feed_token()
+    print("Saved feed token verified.")
+    return DEFAULT_API_URL, saved_token
 
 
 def save_feed_token(token):
@@ -135,11 +147,46 @@ def sign_out_pinterest():
         context.close()
 
 
+def wait_for_pinterest_feed(page, settle_delay_ms=0):
+    try:
+        page.wait_for_function(FEED_READY_SCRIPT, timeout=180000)
+        if settle_delay_ms:
+            page.wait_for_timeout(settle_delay_ms)
+        if not page.evaluate(FEED_READY_SCRIPT):
+            raise RuntimeError("Pinterest left the home feed during the delay.")
+    except PlaywrightTimeoutError as error:
+        raise RuntimeError(
+            "Pinterest is still showing login/signup or the home feed did not load. "
+            "Sign in and wait for the home-feed pins to appear."
+        ) from error
+
+
+def login_pinterest():
+    with sync_playwright() as playwright:
+        context = playwright.chromium.launch_persistent_context(
+            user_data_dir=str(PROFILE_DIR),
+            headless=False,
+            viewport={"width": 1440, "height": 1000},
+        )
+        page = context.pages[0] if context.pages else context.new_page()
+        try:
+            page.goto(HOMEFEED_URL, wait_until="domcontentloaded", timeout=60000)
+            wait_for_pinterest_feed(page, settle_delay_ms=15000)
+        except (PlaywrightError, RuntimeError) as error:
+            try:
+                context.close()
+            except PlaywrightError:
+                pass
+            raise RuntimeError(f"Pinterest sign-in was not completed: {error}") from error
+        context.close()
+    print("Pinterest sign-in saved on this computer.")
+
+
 def collect_image_urls(page):
     urls = page.evaluate(
         """() => {
           const values = [];
-          for (const image of document.images) {
+                    for (const image of document.querySelectorAll("a[href*='/pin/'] img")) {
             values.push(image.currentSrc, image.src, image.getAttribute('data-src'));
             const srcset = image.getAttribute('srcset');
             if (srcset) {
@@ -189,10 +236,11 @@ def main():
     parser.add_argument("--url", default=HOMEFEED_URL, help="Pinterest feed URL")
     parser.add_argument("--scrolls", type=int, default=10, help="Feed scrolls to load")
     parser.add_argument("--output", default="image-links.txt", help="Output text file")
-    parser.add_argument(
-        "--headed", action="store_true", help="Show the browser window (for signing in)"
-    )
-    parser.add_argument("--signout", action="store_true", help="Clear the saved Pinterest session")
+    parser.add_argument("--headed", action="store_true", help="Show the browser while scraping")
+    actions = parser.add_mutually_exclusive_group()
+    actions.add_argument("--login", action="store_true", help="Sign in to Pinterest and verify the home feed")
+    actions.add_argument("--logout", "--signout", dest="logout", action="store_true", help="Clear the saved Pinterest session")
+    actions.add_argument("--change-token", "--set-token", dest="change_token", action="store_true", help="Replace the saved PinFrames feed token")
     parser.add_argument(
         "--pause", type=float, default=1.5, help="Seconds to wait after each scroll"
     )
@@ -202,15 +250,27 @@ def main():
     if args.scrolls < 0 or args.pause < 0:
         parser.error("--scrolls and --pause must be non-negative")
 
-    if args.signout:
+    if args.logout:
         sign_out_pinterest()
+        print("Pinterest session cleared on this computer.")
+        return 0
+
+    if args.login:
+        try:
+            login_pinterest()
+        except (PlaywrightError, RuntimeError) as error:
+            print(error, file=sys.stderr)
+            return 1
         return 0
 
     try:
-        api_url, api_token = configure_cloud()
+        api_url, api_token = configure_cloud(force_prompt=args.change_token)
     except (OSError, ValueError) as error:
         print(error, file=sys.stderr)
         return 2
+
+    if args.change_token:
+        return 0
 
     first_run = not PROFILE_DIR.is_dir()
     if first_run:
@@ -242,16 +302,7 @@ def main():
         page = context.pages[0] if context.pages else context.new_page()
         try:
             page.goto(args.url, wait_until="domcontentloaded", timeout=60000)
-            try:
-                page.wait_for_function(
-                    """() => Array.from(document.images).some(image => {
-                      const sources = [image.currentSrc, image.src, image.getAttribute('srcset')];
-                      return sources.some(source => source && source.includes('i.pinimg.com/'));
-                    })""",
-                    timeout=120000 if args.headed else 30000,
-                )
-            except PlaywrightTimeoutError:
-                pass
+            wait_for_pinterest_feed(page, settle_delay_ms=15000 if args.headed else 0)
 
             image_urls.update(collect_image_urls(page))
             for _ in range(args.scrolls):

@@ -15,15 +15,35 @@ python -m playwright install chromium
 
 No manual `.env` setup is needed. Each run privately asks for the Render feed token; press Enter to reuse the saved token. If a token is rejected, the CLI asks again and retries. A verified token is saved in a permission-restricted, git-ignored `.env`. The Render service URL is built in, so it never prompts for it.
 
-## First run on each computer
+## Pinterest account commands
 
 ```bash
-./.venv/bin/python collector.py
+./.venv/bin/python collector.py --login
 ```
 
-On the first run on each computer, the collector automatically opens Pinterest in Chromium. Sign in and keep the window open until scraping completes. The local login is saved in `.pinterest-browser-profile/` for future runs on this computer.
+This opens the home feed in Chromium and waits until signed-in Pins appear, then waits 15 seconds for the feed to settle. Keep the window open until the command reports success. Signup/login artwork is ignored because only images inside Pin links are collected.
 
-## Later runs
+Sign out of the local Pinterest session:
+
+```bash
+./.venv/bin/python collector.py --logout
+```
+
+Replace the saved PinFrames feed token:
+
+```bash
+./.venv/bin/python collector.py --change-token
+```
+
+## Scrape and sync
+
+Run this after login; use `--force` to ignore the shared refresh age:
+
+```bash
+./.venv/bin/python collector.py --force
+```
+
+For normal startup checks, run:
 
 ```bash
 ./.venv/bin/python collector.py
