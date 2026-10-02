@@ -4,25 +4,24 @@ Standalone Pinterest home-feed collector. It signs in to Pinterest in a local Ch
 
 ## Setup
 
-Clone this repository, then run these commands from the `Collector` folder:
+Clone this repository, then run these commands from the cloned repository folder:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 python -m playwright install chromium
-cp .env.example .env
 ```
 
-Edit `.env` and set `PINFRAMES_FEED_TOKEN` to the current token from the Render service. Keep `.env` private; it is ignored by Git. The service URL is already filled in unless Render shows a different URL.
+No manual `.env` setup is needed. On first run, the CLI asks for the Render service URL (press Enter to accept the default) and privately prompts for the current feed token. It creates a permission-restricted `.env` automatically; the file is git-ignored.
 
 ## First run on each computer
 
 ```bash
-./.venv/bin/python collector.py --headed
+./.venv/bin/python collector.py
 ```
 
-Sign in to Pinterest in Chromium and keep the window open until the scrape completes. The local login is saved in `.pinterest-browser-profile/` for future runs on this computer.
+On the first run on each computer, the collector automatically opens Pinterest in Chromium. Sign in and keep the window open until scraping completes. The local login is saved in `.pinterest-browser-profile/` for future runs on this computer.
 
 ## Later runs
 
@@ -30,4 +29,4 @@ Sign in to Pinterest in Chromium and keep the window open until the scrape compl
 ./.venv/bin/python collector.py
 ```
 
-The collector checks the shared feed's refresh age and skips scraping if it is still fresh. Add `--force` to scrape and upload immediately. Every computer needs its own one-time Pinterest sign-in and private `.env`; only the image links and scrape timestamp sync to PinFrames.
+The collector checks the shared feed's refresh age and skips scraping if it is still fresh. Add `--force` to scrape and upload immediately. Every computer needs its own one-time Pinterest sign-in and private `.env`; only the image links and scrape timestamp sync to PinFrames. The token can be re-entered by deleting `.env` and running the collector again.

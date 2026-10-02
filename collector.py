@@ -1,4 +1,5 @@
 import argparse
+import getpass
 import json
 import os
 import re
@@ -9,7 +10,7 @@ from datetime import datetime
 from urllib.parse import urlsplit
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
@@ -20,7 +21,38 @@ HOMEFEED_URL = "https://in.pinterest.com/homefeed/"
 ROOT = Path(__file__).resolve().parent
 STATE_FILE = ROOT / ".frame-state.json"
 PROFILE_DIR = ROOT / ".pinterest-browser-profile"
-load_dotenv(ROOT / ".env")
+ENV_FILE = ROOT / ".env"
+DEFAULT_API_URL = "https://pinframes.onrender.com"
+
+
+def configure_cloud():
+    load_dotenv(ENV_FILE, override=True)
+    api_url = os.getenv("PINFRAMES_API_URL", "").strip()
+    token = os.getenv("PINFRAMES_FEED_TOKEN", "").strip()
+    changed = False
+
+    if not api_url:
+        api_url = input(f"PinFrames service URL [{DEFAULT_API_URL}]: ").strip() or DEFAULT_API_URL
+        set_key(str(ENV_FILE), "PINFRAMES_API_URL", api_url, quote_mode="always")
+        changed = True
+
+    if not token:
+        token = getpass.getpass("PinFrames private feed token: ").strip()
+        if not token:
+            raise ValueError("A private feed token is required to sync this collector.")
+        set_key(str(ENV_FILE), "PINFRAMES_FEED_TOKEN", token, quote_mode="always")
+        changed = True
+
+    if changed:
+        try:
+            ENV_FILE.chmod(0o600)
+        except OSError:
+            pass
+        print("Saved collector settings in this folder's private .env file.")
+
+    os.environ["PINFRAMES_API_URL"] = api_url
+    os.environ["PINFRAMES_FEED_TOKEN"] = token
+    return api_url, token
 
 
 def cloud_api_request(path, token, api_url, payload=None):
@@ -167,11 +199,16 @@ def main():
         sign_out_pinterest()
         return 0
 
-    api_url = os.getenv("PINFRAMES_API_URL", "").strip()
-    api_token = os.getenv("PINFRAMES_FEED_TOKEN", "").strip()
-    if not (api_url and api_token):
-        print("Set PINFRAMES_API_URL and PINFRAMES_FEED_TOKEN in this folder's .env file.", file=sys.stderr)
+    try:
+        api_url, api_token = configure_cloud()
+    except (OSError, ValueError) as error:
+        print(error, file=sys.stderr)
         return 2
+
+    first_run = not PROFILE_DIR.is_dir()
+    if first_run:
+        args.headed = True
+        print("First run on this computer: sign in to Pinterest in the browser window and leave it open until scraping finishes.")
 
     if not args.headed:
         try:
