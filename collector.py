@@ -27,14 +27,8 @@ DEFAULT_API_URL = "https://pinframes.onrender.com"
 
 def configure_cloud():
     load_dotenv(ENV_FILE, override=True)
-    api_url = os.getenv("PINFRAMES_API_URL", "").strip()
     token = os.getenv("PINFRAMES_FEED_TOKEN", "").strip()
     changed = False
-
-    if not api_url:
-        api_url = input(f"PinFrames service URL [{DEFAULT_API_URL}]: ").strip() or DEFAULT_API_URL
-        set_key(str(ENV_FILE), "PINFRAMES_API_URL", api_url, quote_mode="always")
-        changed = True
 
     if not token:
         token = getpass.getpass("PinFrames private feed token: ").strip()
@@ -50,9 +44,17 @@ def configure_cloud():
             pass
         print("Saved collector settings in this folder's private .env file.")
 
-    os.environ["PINFRAMES_API_URL"] = api_url
     os.environ["PINFRAMES_FEED_TOKEN"] = token
-    return api_url, token
+    return DEFAULT_API_URL, token
+
+
+def save_feed_token(token):
+    set_key(str(ENV_FILE), "PINFRAMES_FEED_TOKEN", token, quote_mode="always")
+    try:
+        ENV_FILE.chmod(0o600)
+    except OSError:
+        pass
+    os.environ["PINFRAMES_FEED_TOKEN"] = token
 
 
 def cloud_api_request(path, token, api_url, payload=None):
@@ -210,15 +212,27 @@ def main():
         args.headed = True
         print("First run on this computer: sign in to Pinterest in the browser window and leave it open until scraping finishes.")
 
-    if not args.headed:
-        try:
-            settings = cloud_api_request("/api/settings", api_token, api_url)
-        except RuntimeError as error:
+    try:
+        settings = cloud_api_request("/api/settings", api_token, api_url)
+    except RuntimeError as error:
+        if "HTTP 401" not in str(error):
             print(error, file=sys.stderr)
             return 1
-        if not cloud_scrape_is_due(settings, args.force):
-            print("The saved PinFrames feed is still fresh; no scrape was started.")
-            return 0
+        print("The saved feed token was rejected.")
+        api_token = getpass.getpass("Enter the current PinFrames private feed token: ").strip()
+        if not api_token:
+            print("A private feed token is required to sync this collector.", file=sys.stderr)
+            return 1
+        save_feed_token(api_token)
+        try:
+            settings = cloud_api_request("/api/settings", api_token, api_url)
+        except RuntimeError as retry_error:
+            print(retry_error, file=sys.stderr)
+            return 1
+
+    if not args.headed and not cloud_scrape_is_due(settings, args.force):
+        print("The saved PinFrames feed is still fresh; no scrape was started.")
+        return 0
 
     output_path = Path(args.output)
     if not output_path.is_absolute():
