@@ -1,0 +1,9 @@
+.venv/
+.env
+.pinterest-browser-profile/
+.frame-state.json
+image-links.txt
+__pycache__/
+*.py[cod]
+*.tmp
+.DS_Store
