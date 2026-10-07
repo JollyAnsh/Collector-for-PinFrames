@@ -24,7 +24,7 @@ STATE_FILE = ROOT / ".frame-state.json"
 PROFILE_DIR = ROOT / ".pinterest-browser-profile"
 ENV_FILE = ROOT / ".env"
 DEFAULT_API_URL = "https://pinframes.onrender.com"
-FEED_READY_SCRIPT = r"""() => {
+FEED_READY_SCRIPT = """() => {
     const path = location.pathname.toLowerCase();
     const isPinterestHomeFeed = location.hostname.endsWith('pinterest.com') && path.includes('homefeed');
     const isAuthRoute = /\/(login|signup|register)(\/|$)/i.test(path);
@@ -232,10 +232,8 @@ def select_best_image_urls(urls):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Collect image URLs visible in your Pinterest home feed.",
-        add_help=False,
+        description="Collect image URLs visible in your Pinterest home feed."
     )
-    parser.add_argument("-h", "--help", "-help", action="help", help="show this help message and exit")
     parser.add_argument("--url", default=HOMEFEED_URL, help="Pinterest feed URL")
     parser.add_argument("--scrolls", type=int, default=10, help="Feed scrolls to load")
     parser.add_argument("--output", default="image-links.txt", help="Output text file")

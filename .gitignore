@@ -1,8 +1,4 @@
 .venv/
-.tools/
-.uv-cache/
-.uv-python/
-.playwright-browsers/
 .env
 .pinterest-browser-profile/
 .frame-state.json
