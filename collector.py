@@ -1,3 +1,4 @@
+#!/Users/verite90/Desktop/Jolly/VBB/Collector-for-PinFrames/.venv/bin/python
 import argparse
 import getpass
 import json
@@ -285,9 +286,9 @@ def main():
         print(error, file=sys.stderr)
         return 1
 
-    if not args.headed and not cloud_scrape_is_due(settings, args.force):
-        print("The saved PinFrames feed is still fresh; no scrape was started.")
-        return 0
+    #if not args.headed and not cloud_scrape_is_due(settings, args.force):
+    #    print("The saved PinFrames feed is still fresh; no scrape was started.")
+    #   return 0
 
     output_path = Path(args.output)
     if not output_path.is_absolute():
